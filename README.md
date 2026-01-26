@@ -1,7 +1,5 @@
 # Welcome to FULAFIA Online Class
 
-## Project info
-
 ## How can I edit this code?
 
 **Use your preferred IDE**
