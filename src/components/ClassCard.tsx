@@ -10,6 +10,7 @@ interface ClassCardProps {
     name: string;
     description: string | null;
     teacher_id: string;
+    archived_at?: string | null;
   };
   isTeacher: boolean;
   studentCount?: number;
@@ -29,9 +30,7 @@ export const ClassCard = ({ classData, isTeacher, studentCount = 0, engagementSc
               {classData.description || "No description provided"}
             </CardDescription>
           </div>
-          {isTeacher && (
-            <Badge variant="default">Teacher</Badge>
-          )}
+          {isTeacher && <Badge variant={classData.archived_at ? "secondary" : "default"}>{classData.archived_at ? "Archived" : "Teacher"}</Badge>}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">

@@ -6,12 +6,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import type { Database } from "@/integrations/supabase/types";
 
-interface Message {
-  id: string;
-  user_id: string;
-  message: string;
-  created_at: string;
+type MessageRow = Database["public"]["Tables"]["session_messages"]["Row"];
+
+interface Message extends MessageRow {
   profiles: {
     full_name: string;
   } | null;
@@ -77,7 +76,7 @@ export const SessionChat = ({ sessionId }: SessionChatProps) => {
         },
         async (payload) => {
           // Fetch the message and profile separately
-          const newMsg = payload.new as any;
+          const newMsg = payload.new as MessageRow;
           const { data: profileData } = await supabase
             .from('profiles')
             .select('full_name')

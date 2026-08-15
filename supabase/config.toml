@@ -1,1 +1,16 @@
-project_id = "xxojdasdhsqqwwjcxykd"
+project_id = "uuqaugqdrgwaeecerxzh"
+
+[functions.livekit-token]
+verify_jwt = false
+
+[functions.biometric-template]
+verify_jwt = false
+
+[functions.ingest-engagement]
+verify_jwt = false
+
+[functions.finalize-session-report]
+verify_jwt = false
+
+[functions.purge-expired-metrics]
+verify_jwt = false

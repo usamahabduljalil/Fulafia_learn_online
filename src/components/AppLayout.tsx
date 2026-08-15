@@ -12,11 +12,11 @@ export function AppLayout() {
           {/* Header with trigger */}
           <header className="h-14 border-b flex items-center px-4 bg-background sticky top-0 z-10">
             <SidebarTrigger />
-            <h1 className="ml-4 text-lg font-semibold">Virtual Classroom</h1>
+            <h1 className="ml-4 text-lg font-semibold">FULAFIA Online Class</h1>
           </header>
 
           {/* Main content */}
-          <main className="flex-1 p-6">
+          <main className="flex-1 p-4 sm:p-6">
             <Outlet />
           </main>
         </div>

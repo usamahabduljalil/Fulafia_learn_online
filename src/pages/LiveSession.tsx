@@ -1,328 +1,132 @@
-import { useEffect, useState, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { 
-  Video, 
-  VideoOff, 
-  Mic, 
-  MicOff, 
-  MonitorUp, 
-  MessageSquare,
-  Users,
-  Phone,
-  Settings
-} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { BarChart3, Loader2, MessageSquare, Phone, ShieldCheck, Users } from "lucide-react";
+import { Track } from "livekit-client";
+import {
+  ConnectionStateToast,
+  ControlBar,
+  GridLayout,
+  LiveKitRoom,
+  ParticipantTile,
+  RoomAudioRenderer,
+  useLocalParticipant,
+  useRoomContext,
+  useTracks,
+} from "@livekit/components-react";
+import "@livekit/components-styles";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { FaceVerification } from "@/components/FaceVerification";
 import { SessionChat } from "@/components/SessionChat";
 import { AttendanceTracker } from "@/components/AttendanceTracker";
 import { EngagementTracker } from "@/components/EngagementTracker";
+import { TeacherInterventions } from "@/components/TeacherInterventions";
+import { VerificationOverrides } from "@/components/VerificationOverrides";
+import type { ClassSession } from "@/types/domain";
+
+interface SessionContext extends ClassSession { classes: { id: string; name: string; teacher_id: string }; }
+interface RoomCredentials { server_url: string; participant_token: string; room_name: string; role: "teacher" | "student"; }
 
 export default function LiveSession() {
-  const { sessionId } = useParams();
-  const navigate = useNavigate();
-  const { user, profile, role } = useAuth();
-  const { toast } = useToast();
-  const videoRef = useRef<HTMLVideoElement>(null);
-  
-  const [sessionData, setSessionData] = useState<any>(null);
-  const [classData, setClassData] = useState<any>(null);
-  const [videoEnabled, setVideoEnabled] = useState(true);
-  const [audioEnabled, setAudioEnabled] = useState(true);
-  const [screenSharing, setScreenSharing] = useState(false);
-  const [participants, setParticipants] = useState<any[]>([]);
-  const [showChat, setShowChat] = useState(true);
+  const { sessionId = "" } = useParams(); const { user, role } = useAuth(); const navigate = useNavigate(); const { toast } = useToast();
+  const [session, setSession] = useState<SessionContext | null>(null); const [verified, setVerified] = useState(role === "teacher"); const [verificationMethod, setVerificationMethod] = useState("biometric"); const [credentials, setCredentials] = useState<RoomCredentials | null>(null); const [loading, setLoading] = useState(true);
+  const [roomError, setRoomError] = useState<string | null>(null); const [connectionAttempt, setConnectionAttempt] = useState(0); const connectedRef = useRef(false);
+
+  const load = useCallback(async () => {
+    if (!user) return;
+    const { data, error } = await supabase.from("class_sessions").select("*, classes!inner(id, name, teacher_id)").eq("id", sessionId).single();
+    if (error || !data) { setLoading(false); toast({ title: "Session unavailable", description: error?.message ?? "Session not found", variant: "destructive" }); return; }
+    const sessionData = data as unknown as SessionContext; setSession(sessionData);
+    if (role === "teacher" && sessionData.classes.teacher_id !== user.id) { navigate("/dashboard", { replace: true }); return; }
+    if (role === "student" && sessionData.status !== "active") { toast({ title: "Session is not live", description: "Return when the teacher starts the session." }); navigate(`/class/${sessionData.class_id}`, { replace: true }); return; }
+    if (role === "student") {
+      const { data: override } = await supabase.from("session_access_overrides").select("id").eq("session_id", sessionId).eq("student_id", user.id).gt("expires_at", new Date().toISOString()).maybeSingle();
+      if (override) { setVerified(true); setVerificationMethod("teacher_override"); }
+    }
+    setLoading(false);
+  }, [navigate, role, sessionId, toast, user]);
+  useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    if (!user) {
-      navigate('/login');
+    if (!verified || !session) return;
+    setLoading(true);
+    setRoomError(null);
+    void supabase.functions.invoke("livekit-token", { body: { session_id: session.id } }).then(async ({ data, error }) => {
+      setLoading(false);
+      if (error || !data?.participant_token) {
+        let message = data?.error ?? error?.message ?? "Room credentials were not issued.";
+        const response = (error as { context?: Response } | null)?.context;
+        if (response) {
+          try {
+            const body = await response.clone().json() as { error?: string };
+            message = body.error ?? message;
+          } catch { /* The SDK fallback message is still actionable. */ }
+        }
+        setRoomError(message);
+        toast({ title: "Unable to join video room", description: message, variant: "destructive" });
+      } else setCredentials(data as RoomCredentials);
+    });
+  }, [connectionAttempt, session, toast, verified]);
+
+  const retryConnection = useCallback(() => {
+    connectedRef.current = false;
+    setCredentials(null);
+    setRoomError(null);
+    setConnectionAttempt((attempt) => attempt + 1);
+  }, []);
+
+  const handleRoomError = useCallback((error: Error) => {
+    if (connectedRef.current) {
+      toast({ title: "Classroom media warning", description: error.message, variant: "destructive" });
       return;
     }
-    fetchSessionData();
-  }, [sessionId, user]);
+    setRoomError(error.message || "The LiveKit server rejected the connection.");
+  }, [toast]);
+  const handleRoomConnected = useCallback(() => { connectedRef.current = true; }, []);
+  const handleRoomDisconnected = useCallback(() => {
+    connectedRef.current = false;
+    setRoomError("The connection to the LiveKit room closed before the class ended.");
+  }, []);
 
-  const fetchSessionData = async () => {
-    try {
-      const { data: session, error: sessionError } = await supabase
-        .from('class_sessions')
-        .select('*')
-        .eq('id', sessionId)
-        .maybeSingle();
+  if (loading) return <div className="grid min-h-screen place-items-center bg-slate-950 text-white"><div className="text-center"><Loader2 className="mx-auto mb-3 h-9 w-9 animate-spin text-cyan-400" /><p>Preparing secure classroom…</p></div></div>;
+  if (!session) return <div className="grid min-h-screen place-items-center"><Card><CardHeader><CardTitle>Session not found</CardTitle></CardHeader><CardContent><Button onClick={() => navigate("/dashboard")}>Return to dashboard</Button></CardContent></Card></div>;
+  if (role === "student" && !verified) return <div className="grid min-h-screen place-items-center bg-slate-950 p-4"><Card className="w-full max-w-xl"><CardHeader><CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" />Verify before joining</CardTitle><CardDescription>{session.classes.name} · {session.title}. Three local liveness steps protect class access.</CardDescription></CardHeader><CardContent><FaceVerification sessionId={session.id} onVerified={() => setVerified(true)} /><Button variant="ghost" className="mt-3 w-full" onClick={() => navigate("/profile")}>Manage face enrollment</Button></CardContent></Card></div>;
+  if (roomError) return <div className="grid min-h-screen place-items-center bg-slate-950 p-4"><Card className="w-full max-w-xl"><CardHeader><CardTitle>Video connection failed</CardTitle><CardDescription>The class remains live. Review the connection error below, then retry.</CardDescription></CardHeader><CardContent className="space-y-4"><p className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{roomError}</p><div className="flex flex-col gap-2 sm:flex-row"><Button className="flex-1" onClick={retryConnection}>Retry connection</Button><Button className="flex-1" variant="outline" onClick={() => navigate(`/class/${session.class_id}`)}>Return to class</Button></div></CardContent></Card></div>;
+  if (!credentials) return <div className="grid min-h-screen place-items-center"><Card><CardHeader><CardTitle>Video room unavailable</CardTitle><CardDescription>Confirm that LiveKit secrets and the Edge Function are deployed.</CardDescription></CardHeader><CardContent><Button onClick={() => navigate(`/class/${session.class_id}`)}>Return to class</Button></CardContent></Card></div>;
 
-      if (sessionError) throw sessionError;
-      
-      if (!session) {
-        toast({
-          title: "Session not found",
-          description: "This session does not exist.",
-          variant: "destructive",
-        });
-        navigate('/dashboard');
-        return;
-      }
-      setSessionData(session);
+  return <LiveKitRoom token={credentials.participant_token} serverUrl={credentials.server_url} connect audio video data-lk-theme="default" className="min-h-screen bg-slate-950 text-white" onConnected={handleRoomConnected} onError={handleRoomError} onDisconnected={handleRoomDisconnected}><ClassroomView session={session} verificationMethod={verificationMethod} /><RoomAudioRenderer /><ConnectionStateToast /></LiveKitRoom>;
+}
 
-      // Check if student is trying to join non-active session
-      if (role === 'student' && session.status !== 'active') {
-        toast({
-          title: "Session not started",
-          description: "The teacher hasn't started this session yet.",
-          variant: "destructive",
-        });
-        navigate(`/class/${session.class_id}`);
-        return;
-      }
+function ClassroomView({ session, verificationMethod }: { session: SessionContext; verificationMethod: string }) {
+  const { user, role, profile } = useAuth(); const navigate = useNavigate(); const { toast } = useToast(); const room = useRoomContext();
+  const { localParticipant } = useLocalParticipant(); const [showChat, setShowChat] = useState(true); const [ending, setEnding] = useState(false);
+  const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }, { source: Track.Source.ScreenShare, withPlaceholder: false }], { onlySubscribed: false });
+  const mediaTracks = [Track.Source.Camera, Track.Source.Microphone].map((source) => localParticipant.getTrackPublication(source)?.track?.mediaStreamTrack).filter((track): track is MediaStreamTrack => Boolean(track));
+  const mediaStream = mediaTracks.length ? new MediaStream(mediaTracks) : null;
+  const isTeacher = role === "teacher" && session.classes.teacher_id === user?.id;
 
-      // Fetch class data
-      const { data: cls, error: classError } = await supabase
-        .from('classes')
-        .select('*, profiles:teacher_id(full_name)')
-        .eq('id', session.class_id)
-        .maybeSingle();
+  useEffect(() => {
+    const channel = supabase.channel(`session-state-${session.id}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "class_sessions", filter: `id=eq.${session.id}` }, (payload) => {
+      if ((payload.new as { status?: string }).status === "completed") { toast({ title: "Session ended", description: "The teacher ended this class." }); void room.disconnect().finally(() => navigate(`/class/${session.class_id}`, { replace: true })); }
+    }).subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [navigate, room, session.class_id, session.id, toast]);
 
-      if (classError) throw classError;
-      
-      if (!cls) {
-        toast({
-          title: "Class not found",
-          description: "This class does not exist.",
-          variant: "destructive",
-        });
-        navigate('/dashboard');
-        return;
-      }
-      setClassData(cls);
-
-      // Fetch enrolled students
-      const { data: enrollments } = await supabase
-        .from('class_enrollments')
-        .select('*, profiles:student_id(full_name, avatar_url)')
-        .eq('class_id', session.class_id);
-
-      setParticipants(enrollments || []);
-
-      // Initialize media after successful checks
-      initializeMedia();
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
-      navigate('/dashboard');
-    }
+  const leave = async () => { await room.disconnect(); navigate(`/class/${session.class_id}`); };
+  const end = async () => {
+    if (!window.confirm("End this session for everyone and generate reports?")) return;
+    setEnding(true);
+    const { error } = await supabase.functions.invoke("finalize-session-report", { body: { session_id: session.id } });
+    setEnding(false);
+    if (error) { toast({ title: "Unable to end session", description: error.message, variant: "destructive" }); return; }
+    await room.disconnect(); navigate(`/analytics/${session.id}`);
   };
 
-  const initializeMedia = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-      });
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-    } catch (error) {
-      console.error('Error accessing media devices:', error);
-      toast({
-        title: "Camera/Microphone Error",
-        description: "Could not access your camera or microphone.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const toggleVideo = () => {
-    if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      const videoTrack = stream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setVideoEnabled(videoTrack.enabled);
-      }
-    }
-  };
-
-  const toggleAudio = () => {
-    if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setAudioEnabled(audioTrack.enabled);
-      }
-    }
-  };
-
-  const endSession = async () => {
-    const isTeacher = classData?.teacher_id === user?.id;
-    
-    // Only teacher can end session and update status
-    if (isTeacher) {
-      try {
-        await supabase
-          .from('class_sessions')
-          .update({ status: 'completed' })
-          .eq('id', sessionId);
-      } catch (error) {
-        console.error('Error updating session status:', error);
-      }
-    }
-
-    if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-    }
-    navigate(`/class/${classData?.id}`);
-  };
-
-  const isTeacher = classData?.teacher_id === user?.id;
-
-  return (
-    <div className="min-h-screen bg-background flex flex-col">
-      {/* Top Bar */}
-      <header className="border-b bg-card p-4">
-        <div className="container mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold">{classData?.name}</h1>
-            <p className="text-sm text-muted-foreground">
-              {isTeacher ? "Teaching" : "Attending"} • {participants.length} participant(s)
-            </p>
-          </div>
-          <Button variant="destructive" onClick={endSession} className="gap-2">
-            <Phone className="h-4 w-4 rotate-135" />
-            End Session
-          </Button>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <div className="flex-1 container mx-auto p-4 grid gap-4 lg:grid-cols-4">
-        {/* Video Grid */}
-        <div className="lg:col-span-3 space-y-4">
-          {/* Main Video */}
-          <Card className="shadow-soft overflow-hidden">
-            <div className="aspect-video bg-gray-900 relative">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute top-4 left-4">
-                <Badge className="bg-red-500">LIVE</Badge>
-              </div>
-              <div className="absolute bottom-4 left-4 bg-black/50 backdrop-blur-sm px-3 py-1 rounded-lg">
-                <p className="text-white text-sm font-medium">
-                  {profile?.full_name} (You)
-                </p>
-              </div>
-            </div>
-          </Card>
-
-          {/* Controls */}
-          <Card className="shadow-soft">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-center gap-2">
-                <Button
-                  variant={audioEnabled ? "default" : "destructive"}
-                  size="lg"
-                  onClick={toggleAudio}
-                  className="rounded-full h-12 w-12 p-0"
-                >
-                  {audioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
-                </Button>
-                <Button
-                  variant={videoEnabled ? "default" : "destructive"}
-                  size="lg"
-                  onClick={toggleVideo}
-                  className="rounded-full h-12 w-12 p-0"
-                >
-                  {videoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
-                </Button>
-                <Button
-                  variant={screenSharing ? "secondary" : "outline"}
-                  size="lg"
-                  onClick={() => setScreenSharing(!screenSharing)}
-                  className="rounded-full h-12 w-12 p-0"
-                >
-                  <MonitorUp className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant={showChat ? "secondary" : "outline"}
-                  size="lg"
-                  onClick={() => setShowChat(!showChat)}
-                  className="rounded-full h-12 w-12 p-0"
-                >
-                  <MessageSquare className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="lg"
-                  className="rounded-full h-12 w-12 p-0"
-                >
-                  <Settings className="h-5 w-5" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Sidebar */}
-        {showChat && (
-          <div className="space-y-4">
-            {/* Real-time Chat */}
-            <div className="h-96">
-              <SessionChat sessionId={sessionId || ''} />
-            </div>
-
-            {/* Attendance Tracker (Teachers Only) */}
-            <AttendanceTracker sessionId={sessionId || ''} />
-
-            {/* AI Engagement Tracker */}
-            <EngagementTracker sessionId={sessionId || ''} />
-
-          {/* Participants */}
-          <Card className="shadow-soft">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Users className="h-4 w-4" />
-                Participants ({participants.length + 1})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-primary/10">
-                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-sm font-medium">
-                  {profile?.full_name?.charAt(0)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">
-                    {profile?.full_name} (You)
-                  </p>
-                </div>
-              </div>
-              {participants.slice(0, 5).map((p) => (
-                <div key={p.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted">
-                  <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-secondary-foreground text-sm font-medium">
-                    {p.profiles?.full_name?.charAt(0)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">
-                      {p.profiles?.full_name}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <div className="flex min-h-screen flex-col"><header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 bg-slate-950 px-4 py-3"><div><div className="flex items-center gap-2"><h1 className="font-semibold">{session.classes.name}</h1><Badge className="bg-red-600">LIVE</Badge></div><p className="text-sm text-slate-400">{session.title} · {profile?.full_name}</p></div><div className="flex gap-2"><Button variant="secondary" size="sm" onClick={() => setShowChat((value) => !value)}><MessageSquare className="mr-2 h-4 w-4" />Chat</Button>{isTeacher ? <Button variant="destructive" size="sm" onClick={end} disabled={ending}><Phone className="mr-2 h-4 w-4" />{ending ? "Ending…" : "End for everyone"}</Button> : <Button variant="destructive" size="sm" onClick={leave}><Phone className="mr-2 h-4 w-4" />Leave</Button>}</div></header>
+    <main className="grid flex-1 gap-4 overflow-hidden p-4 xl:grid-cols-[minmax(0,1fr)_22rem]"><section className="flex min-h-[70vh] flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-900"><div className="min-h-0 flex-1 p-2"><GridLayout tracks={tracks} className="h-full"><ParticipantTile /></GridLayout></div><div className="border-t border-slate-800 p-2"><ControlBar controls={{ chat: false, leave: false }} variation="minimal" /></div></section><aside className={`space-y-4 overflow-y-auto ${showChat ? "block" : "hidden xl:block"}`}><div className="h-80 text-slate-950"><SessionChat sessionId={session.id} /></div><AttendanceTracker sessionId={session.id} connectionId={localParticipant.sid} verificationMethod={verificationMethod} /><EngagementTracker sessionId={session.id} mediaStream={mediaStream} /><TeacherInterventions sessionId={session.id} /><VerificationOverrides sessionId={session.id} classId={session.class_id} />{isTeacher ? <Button variant="outline" className="w-full text-slate-950" onClick={() => navigate(`/analytics/${session.id}`)}><BarChart3 className="mr-2 h-4 w-4" />Open analytics</Button> : null}<Card className="border-slate-800 bg-slate-900 text-white"><CardContent className="flex items-center gap-2 p-4 text-sm"><Users className="h-4 w-4" />{room.remoteParticipants.size + 1} participant(s) connected</CardContent></Card></aside></main>
+  </div>;
 }

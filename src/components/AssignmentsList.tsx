@@ -1,15 +1,21 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Plus, Trash2, FileEdit, Eye } from "lucide-react";
+import { Calendar, Plus, Trash2, FileEdit, Eye, Pencil } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { CreateAssignmentDialog } from "./CreateAssignmentDialog";
 import { SubmitAssignmentDialog } from "./SubmitAssignmentDialog";
-import { GradeSubmissionDialog } from "./GradeSubmissionDialog";
+import { SubmissionsDialog } from "./SubmissionsDialog";
+import { EditAssignmentDialog } from "./EditAssignmentDialog";
+import type { Database } from "@/integrations/supabase/types";
+
+type AssignmentRow = Database["public"]["Tables"]["assignments"]["Row"];
+type SubmissionRow = Database["public"]["Tables"]["assignment_submissions"]["Row"];
+type AssignmentView = AssignmentRow & { submission?: SubmissionRow | null };
 
 interface AssignmentsListProps {
   classId: string;
@@ -17,38 +23,16 @@ interface AssignmentsListProps {
 }
 
 export function AssignmentsList({ classId, isTeacher }: AssignmentsListProps) {
-  const [assignments, setAssignments] = useState<any[]>([]);
+  const [assignments, setAssignments] = useState<AssignmentView[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [selectedAssignment, setSelectedAssignment] = useState<any>(null);
-  const [selectedSubmission, setSelectedSubmission] = useState<any>(null);
-  const [gradeDialogOpen, setGradeDialogOpen] = useState(false);
+  const [selectedAssignment, setSelectedAssignment] = useState<AssignmentView | null>(null);
+  const [submissionsAssignment, setSubmissionsAssignment] = useState<AssignmentRow | null>(null);
+  const [editingAssignment, setEditingAssignment] = useState<AssignmentRow | null>(null);
   const { user } = useAuth();
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetchAssignments();
-
-    const channel = supabase
-      .channel('assignments-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'assignments',
-          filter: `class_id=eq.${classId}`
-        },
-        () => fetchAssignments()
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [classId]);
-
-  const fetchAssignments = async () => {
+  const fetchAssignments = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('assignments')
@@ -75,19 +59,49 @@ export function AssignmentsList({ classId, isTeacher }: AssignmentsListProps) {
       } else {
         setAssignments(data || []);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error instanceof Error ? error.message : "Could not load assignments.",
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
-  };
+  }, [classId, isTeacher, toast, user]);
+
+  useEffect(() => {
+    void fetchAssignments();
+
+    const channel = supabase
+      .channel(`assignments-${classId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'assignments',
+          filter: `class_id=eq.${classId}`
+        },
+        () => void fetchAssignments()
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [classId, fetchAssignments]);
 
   const deleteAssignment = async (id: string) => {
     try {
+      if (!window.confirm("Delete this assignment, every submission, and all attached files?")) return;
+      const { data: submissionFiles, error: filesError } = await supabase.from("assignment_submissions").select("storage_path").eq("assignment_id", id);
+      if (filesError) throw filesError;
+      const paths = (submissionFiles ?? []).flatMap((submission) => submission.storage_path ? [submission.storage_path] : []);
+      if (paths.length) {
+        const { error: storageError } = await supabase.storage.from("assignment-submissions").remove(paths);
+        if (storageError) throw storageError;
+      }
       const { error } = await supabase
         .from('assignments')
         .delete()
@@ -99,40 +113,10 @@ export function AssignmentsList({ classId, isTeacher }: AssignmentsListProps) {
         title: "Success",
         description: "Assignment deleted successfully",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
-    }
-  };
-
-  const viewSubmissions = async (assignmentId: string, points: number) => {
-    try {
-      const { data, error } = await supabase
-        .from('assignment_submissions')
-        .select(`
-          *,
-          student:profiles!assignment_submissions_student_id_fkey(full_name)
-        `)
-        .eq('assignment_id', assignmentId);
-
-      if (error) throw error;
-
-      if (data && data.length > 0) {
-        setSelectedSubmission({ ...data[0], assignmentPoints: points });
-        setGradeDialogOpen(true);
-      } else {
-        toast({
-          title: "No submissions",
-          description: "No students have submitted this assignment yet.",
-        });
-      }
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
+        description: error instanceof Error ? error.message : "Could not delete the assignment.",
         variant: "destructive",
       });
     }
@@ -164,6 +148,10 @@ export function AssignmentsList({ classId, isTeacher }: AssignmentsListProps) {
           assignments.map((assignment) => {
             const isPastDue = assignment.due_date && new Date(assignment.due_date) < new Date();
             const hasSubmitted = assignment.submission;
+            const submissionsClosed = Boolean(isPastDue && !assignment.allow_late_submissions);
+            const canSubmit = !hasSubmitted
+              ? !submissionsClosed
+              : !hasSubmitted.graded_at && assignment.allow_resubmission && !submissionsClosed;
 
             return (
               <div
@@ -174,14 +162,14 @@ export function AssignmentsList({ classId, isTeacher }: AssignmentsListProps) {
                   <div className="flex items-center gap-2 mb-2">
                     <h4 className="font-medium">{assignment.title}</h4>
                     {!isTeacher && hasSubmitted && (
-                      <Badge variant={assignment.submission.grade ? "default" : "secondary"}>
-                        {assignment.submission.grade
+                      <Badge variant={assignment.submission.grade !== null ? "default" : "secondary"}>
+                        {assignment.submission.grade !== null
                           ? `${assignment.submission.grade}/${assignment.points}`
                           : "Submitted"}
                       </Badge>
                     )}
                     {!isTeacher && isPastDue && !hasSubmitted && (
-                      <Badge variant="destructive">Past Due</Badge>
+                      <Badge variant="destructive">{assignment.allow_late_submissions ? "Late" : "Closed"}</Badge>
                     )}
                   </div>
                   {assignment.description && (
@@ -200,14 +188,14 @@ export function AssignmentsList({ classId, isTeacher }: AssignmentsListProps) {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  {!isTeacher && !hasSubmitted && (
+                  {!isTeacher && canSubmit && (
                     <Button
                       size="sm"
                       onClick={() => setSelectedAssignment(assignment)}
                       className="gap-2"
                     >
                       <FileEdit className="h-4 w-4" />
-                      Submit
+                      {hasSubmitted ? "Update" : "Submit"}
                     </Button>
                   )}
                   {isTeacher && (
@@ -215,11 +203,14 @@ export function AssignmentsList({ classId, isTeacher }: AssignmentsListProps) {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => viewSubmissions(assignment.id, assignment.points || 100)}
+                        onClick={() => setSubmissionsAssignment(assignment)}
                         className="gap-2"
                       >
                         <Eye className="h-4 w-4" />
                         View
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setEditingAssignment(assignment)} aria-label={`Edit ${assignment.title}`}>
+                        <Pencil className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -248,19 +239,14 @@ export function AssignmentsList({ classId, isTeacher }: AssignmentsListProps) {
           open={!!selectedAssignment}
           onOpenChange={(open) => !open && setSelectedAssignment(null)}
           assignment={selectedAssignment}
+          existingSubmission={selectedAssignment.submission ?? null}
           onSubmitSuccess={fetchAssignments}
         />
       )}
 
-      {selectedSubmission && (
-        <GradeSubmissionDialog
-          open={gradeDialogOpen}
-          onOpenChange={setGradeDialogOpen}
-          submission={selectedSubmission}
-          assignmentPoints={selectedSubmission.assignmentPoints}
-          onGraded={fetchAssignments}
-        />
-      )}
+      {submissionsAssignment ? <SubmissionsDialog assignmentId={submissionsAssignment.id} assignmentTitle={submissionsAssignment.title} points={submissionsAssignment.points ?? 100} open onOpenChange={(open) => { if (!open) setSubmissionsAssignment(null); }} /> : null}
+
+      {editingAssignment ? <EditAssignmentDialog assignment={editingAssignment} open onOpenChange={(open) => { if (!open) setEditingAssignment(null); }} onSaved={fetchAssignments} /> : null}
     </Card>
   );
 }

@@ -11,9 +11,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import type { ClassAccessMode } from "@/types/domain";
 
 interface CreateClassDialogProps {
   onClassCreated: () => void;
@@ -23,6 +25,7 @@ export const CreateClassDialog = ({ onClassCreated }: CreateClassDialogProps) =>
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [accessMode, setAccessMode] = useState<ClassAccessMode>("public");
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
@@ -39,7 +42,8 @@ export const CreateClassDialog = ({ onClassCreated }: CreateClassDialogProps) =>
         .insert({
           name,
           description,
-          teacher_id: user.id
+          teacher_id: user.id,
+          access_mode: accessMode,
         });
 
       if (error) throw error;
@@ -51,12 +55,13 @@ export const CreateClassDialog = ({ onClassCreated }: CreateClassDialogProps) =>
 
       setName("");
       setDescription("");
+      setAccessMode("public");
       setOpen(false);
       onClassCreated();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error instanceof Error ? error.message : "Could not create the class.",
         variant: "destructive",
       });
     } finally {
@@ -89,6 +94,17 @@ export const CreateClassDialog = ({ onClassCreated }: CreateClassDialogProps) =>
               onChange={(e) => setName(e.target.value)}
               required
             />
+          </div>
+          <div className="space-y-2">
+            <Label>Enrollment access</Label>
+            <Select value={accessMode} onValueChange={(value: ClassAccessMode) => setAccessMode(value)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="public">Public — immediate enrollment</SelectItem>
+                <SelectItem value="approval">Teacher approval required</SelectItem>
+                <SelectItem value="invite">Invite code required</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2">
             <Label htmlFor="description">Description</Label>

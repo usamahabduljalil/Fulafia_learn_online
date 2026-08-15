@@ -1,200 +1,56 @@
-import { useEffect, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { BookOpen, LockKeyhole, Search, ShieldCheck, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { GraduationCap, Search, ArrowLeft, Users } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { EnrollmentDialog } from "@/components/EnrollmentDialog";
+import type { ClassSummary, EnrollmentStatus } from "@/types/domain";
+
+interface CatalogClass extends ClassSummary { profiles?: { full_name: string } | null; }
 
 export default function BrowseClasses() {
   const { user, role } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [classes, setClasses] = useState<any[]>([]);
-  const [filteredClasses, setFilteredClasses] = useState<any[]>([]);
-  const [enrolledClassIds, setEnrolledClassIds] = useState<Set<string>>(new Set());
-  const [searchQuery, setSearchQuery] = useState("");
+  const [classes, setClasses] = useState<CatalogClass[]>([]);
+  const [statuses, setStatuses] = useState<Map<string, EnrollmentStatus>>(new Map());
+  const [selectedClass, setSelectedClass] = useState<CatalogClass | null>(null);
+  const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!user) {
-      navigate('/login');
-      return;
+  const load = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    const classPromise = supabase.from("classes").select("*, profiles:teacher_id(full_name)").is("archived_at", null).order("created_at", { ascending: false });
+    const enrollmentPromise = role === "student" ? supabase.from("class_enrollments").select("class_id, status").eq("student_id", user.id) : Promise.resolve({ data: [], error: null });
+    const [classResult, enrollmentResult] = await Promise.all([classPromise, enrollmentPromise]);
+    setLoading(false);
+    if (classResult.error || enrollmentResult.error) {
+      toast({ title: "Catalogue unavailable", description: classResult.error?.message ?? enrollmentResult.error?.message, variant: "destructive" }); return;
     }
-    fetchClasses();
-  }, [user]);
+    setClasses((classResult.data ?? []) as unknown as CatalogClass[]);
+    setStatuses(new Map((enrollmentResult.data ?? []).map((item) => [item.class_id, item.status as EnrollmentStatus])));
+  }, [role, toast, user]);
+  useEffect(() => { void load(); }, [load]);
 
-  useEffect(() => {
-    if (searchQuery.trim() === "") {
-      setFilteredClasses(classes);
-    } else {
-      const filtered = classes.filter(cls =>
-        cls.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        cls.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        cls.profiles?.full_name.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      setFilteredClasses(filtered);
-    }
-  }, [searchQuery, classes]);
+  const filtered = useMemo(() => deferredSearch ? classes.filter((item) => `${item.name} ${item.description ?? ""} ${item.profiles?.full_name ?? ""}`.toLowerCase().includes(deferredSearch)) : classes, [classes, deferredSearch]);
+  const updateStatus = (classId: string, status: EnrollmentStatus) => setStatuses((current) => new Map(current).set(classId, status));
 
-  const fetchClasses = async () => {
-    try {
-      // Fetch all classes with teacher info
-      const { data: allClasses, error: classError } = await supabase
-        .from('classes')
-        .select(`
-          *,
-          profiles:teacher_id (
-            full_name,
-            email
-          )
-        `)
-        .order('created_at', { ascending: false });
-
-      if (classError) throw classError;
-
-      // Fetch user's enrollments if student
-      if (role === 'student') {
-        const { data: enrollments, error: enrollError } = await supabase
-          .from('class_enrollments')
-          .select('class_id')
-          .eq('student_id', user?.id);
-
-        if (enrollError) throw enrollError;
-
-        const enrolledIds = new Set(enrollments?.map(e => e.class_id) || []);
-        setEnrolledClassIds(enrolledIds);
-      }
-
-      setClasses(allClasses || []);
-      setFilteredClasses(allClasses || []);
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEnroll = async (classId: string) => {
-    try {
-      const { error } = await supabase
-        .from('class_enrollments')
-        .insert({
-          class_id: classId,
-          student_id: user?.id
-        });
-
-      if (error) throw error;
-
-      toast({
-        title: "Enrolled!",
-        description: "You have successfully enrolled in this class.",
-      });
-
-      setEnrolledClassIds(prev => new Set([...prev, classId]));
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold mb-2">Browse Classes</h1>
-        <p className="text-muted-foreground">Discover and enroll in available classes</p>
-      </div>
-        <div className="mb-8">
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search classes..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-        </div>
-
-        {filteredClasses.length === 0 ? (
-          <Card className="shadow-soft">
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <GraduationCap className="h-16 w-16 text-muted-foreground mb-4" />
-              <h3 className="text-xl font-semibold mb-2">No classes found</h3>
-              <p className="text-muted-foreground">
-                {searchQuery ? "Try a different search term" : "No classes available at the moment"}
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {filteredClasses.map((cls) => {
-              const isEnrolled = enrolledClassIds.has(cls.id);
-              const isOwnClass = cls.teacher_id === user?.id;
-
-              return (
-                <Card key={cls.id} className="shadow-soft hover:shadow-lg transition-shadow">
-                  <CardHeader>
-                    <div className="flex items-start justify-between gap-2">
-                      <CardTitle className="line-clamp-1">{cls.name}</CardTitle>
-                      {isOwnClass ? (
-                        <Badge>Your Class</Badge>
-                      ) : isEnrolled ? (
-                        <Badge variant="secondary">Enrolled</Badge>
-                      ) : null}
-                    </div>
-                    <CardDescription className="line-clamp-2">
-                      {cls.description || "No description provided"}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2 text-sm">
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Users className="h-4 w-4" />
-                        <span>Instructor: {cls.profiles?.full_name}</span>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() => navigate(`/class/${cls.id}`)}
-                      >
-                        View Details
-                      </Button>
-                      {!isOwnClass && !isEnrolled && role === 'student' && (
-                        <Button
-                          className="flex-1"
-                          onClick={() => handleEnroll(cls.id)}
-                        >
-                          Enroll
-                        </Button>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-    </div>
-  );
+  return <div className="space-y-8">
+    <div><h1 className="text-3xl font-bold">Class catalogue</h1><p className="text-muted-foreground">Find public classes or use an invitation supplied by your teacher.</p></div>
+    <div className="relative max-w-xl"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by class, description, or instructor" className="pl-10" /></div>
+    {loading ? <div className="py-12 text-center text-muted-foreground">Loading classes…</div> : filtered.length ? <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">{filtered.map((item) => {
+      const status = statuses.get(item.id);
+      const own = item.teacher_id === user?.id;
+      const AccessIcon = item.access_mode === "invite" ? LockKeyhole : item.access_mode === "approval" ? ShieldCheck : Users;
+      return <Card key={item.id} className="flex flex-col"><CardHeader><div className="flex items-start justify-between gap-3"><div><CardTitle>{item.name}</CardTitle><CardDescription className="mt-2 line-clamp-2">{item.description || "No description provided"}</CardDescription></div>{own ? <Badge>Your class</Badge> : status ? <Badge variant={status === "active" ? "default" : "secondary"} className="capitalize">{status}</Badge> : null}</div></CardHeader><CardContent className="mt-auto space-y-4"><div className="space-y-2 text-sm text-muted-foreground"><p className="flex items-center gap-2"><Users className="h-4 w-4" />{item.profiles?.full_name ?? "FULAFIA instructor"}</p><p className="flex items-center gap-2 capitalize"><AccessIcon className="h-4 w-4" />{item.access_mode === "approval" ? "Approval required" : item.access_mode === "invite" ? "Invite only" : "Open enrollment"}</p></div><div className="flex gap-2"><Button variant="outline" className="flex-1" onClick={() => navigate(`/class/${item.id}`)}>View details</Button>{role === "student" && !own && !status ? <Button className="flex-1" onClick={() => setSelectedClass(item)}>{item.access_mode === "approval" ? "Request" : "Enroll"}</Button> : null}</div></CardContent></Card>;
+    })}</div> : <Card><CardContent className="flex flex-col items-center py-12 text-center"><BookOpen className="mb-4 h-12 w-12 text-muted-foreground" /><h2 className="font-semibold">No classes found</h2><p className="text-sm text-muted-foreground">Try a different search term.</p></CardContent></Card>}
+    {selectedClass ? <EnrollmentDialog classId={selectedClass.id} className={selectedClass.name} accessMode={selectedClass.access_mode} open onOpenChange={(open) => { if (!open) setSelectedClass(null); }} onEnrolled={(status) => updateStatus(selectedClass.id, status)} /> : null}
+  </div>;
 }

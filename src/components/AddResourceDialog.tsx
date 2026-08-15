@@ -36,21 +36,18 @@ export function AddResourceDialog({ open, onOpenChange, classId }: AddResourceDi
     if (!user || !file) return;
 
     setLoading(true);
+    let uploadedPath: string | null = null;
     try {
       // Upload file to storage
       const fileExt = file.name.split('.').pop();
-      const fileName = `${classId}/${Date.now()}.${fileExt}`;
+      const fileName = `${classId}/${crypto.randomUUID()}.${fileExt}`;
       
       const { error: uploadError } = await supabase.storage
         .from('class-resources')
         .upload(fileName, file);
 
       if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('class-resources')
-        .getPublicUrl(fileName);
+      uploadedPath = fileName;
 
       // Insert resource record
       const { error } = await supabase
@@ -59,7 +56,8 @@ export function AddResourceDialog({ open, onOpenChange, classId }: AddResourceDi
           class_id: classId,
           title,
           description,
-          file_url: publicUrl,
+          file_url: null,
+          storage_path: fileName,
           resource_type: resourceType,
           uploaded_by: user.id,
         });
@@ -76,10 +74,11 @@ export function AddResourceDialog({ open, onOpenChange, classId }: AddResourceDi
       setFile(null);
       setResourceType("document");
       onOpenChange(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      if (uploadedPath) await supabase.storage.from('class-resources').remove([uploadedPath]);
       toast({
         title: "Error",
-        description: error.message,
+        description: error instanceof Error ? error.message : "Could not upload the resource.",
         variant: "destructive",
       });
     } finally {

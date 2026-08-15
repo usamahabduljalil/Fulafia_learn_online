@@ -1,188 +1,96 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { BookOpen, CircleAlert, GraduationCap, Loader2, RefreshCw, TrendingUp, Users, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { GraduationCap, Video, Users, TrendingUp, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { CreateClassDialog } from "@/components/CreateClassDialog";
 import { ClassCard } from "@/components/ClassCard";
+import { useToast } from "@/hooks/use-toast";
+import type { ClassSummary } from "@/types/domain";
 
-const Dashboard = () => {
-  const { user, profile, role, signOut, loading } = useAuth();
+interface TeacherStats { activeClasses: number; totalStudents: number; averageEngagement: number; }
+interface StudentEnrollment { id: string; status: "pending" | "active" | "rejected"; classes: ClassSummary | null; }
+
+export default function Dashboard() {
+  const { user, profile, role, error: accountError, refreshProfile } = useAuth();
   const navigate = useNavigate();
-  const [classes, setClasses] = useState<any[]>([]);
-  const [enrolledClasses, setEnrolledClasses] = useState<any[]>([]);
-  const [dataLoading, setDataLoading] = useState(true);
+  const { toast } = useToast();
+  const [classes, setClasses] = useState<ClassSummary[]>([]);
+  const [enrollments, setEnrollments] = useState<StudentEnrollment[]>([]);
+  const [stats, setStats] = useState<TeacherStats>({ activeClasses: 0, totalStudents: 0, averageEngagement: 0 });
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!loading && !user) {
-      navigate('/login');
-    } else if (user && role) {
-      fetchClasses();
-    }
-  }, [user, loading, navigate, role]);
-
-  const fetchClasses = async () => {
-    setDataLoading(true);
+  const fetchDashboard = useCallback(async () => {
+    if (!user || !role) return;
+    setLoading(true);
     try {
-      if (role === 'teacher') {
-        // Fetch classes created by teacher
-        const { data, error } = await supabase
-          .from('classes')
-          .select('*')
-          .eq('teacher_id', user?.id)
-          .order('created_at', { ascending: false });
-
+      if (role === "teacher") {
+        const { data: classRows, error } = await supabase.from("classes").select("*").eq("teacher_id", user.id).order("created_at", { ascending: false });
         if (error) throw error;
-        setClasses(data || []);
+        const typedClasses = (classRows ?? []) as ClassSummary[];
+        const activeClasses = typedClasses.filter((item) => !item.archived_at);
+        const ids = activeClasses.map((item) => item.id);
+        const [enrollmentResult, reportResult] = ids.length ? await Promise.all([
+          supabase.from("class_enrollments").select("class_id, student_id").in("class_id", ids).eq("status", "active"),
+          supabase.from("student_session_reports").select("average_overall, class_sessions!inner(class_id)").in("class_sessions.class_id", ids),
+        ]) : [{ data: [] }, { data: [] }];
+        const students = new Set((enrollmentResult.data ?? []).map((item) => item.student_id));
+        const reportScores = (reportResult.data ?? []).map((item) => item.average_overall).filter((value): value is number => value !== null);
+        const classCounts = new Map<string, number>();
+        for (const enrollment of enrollmentResult.data ?? []) classCounts.set(enrollment.class_id, (classCounts.get(enrollment.class_id) ?? 0) + 1);
+        setClasses(typedClasses.map((item) => ({ ...item, student_count: classCounts.get(item.id) ?? 0 })));
+        setStats({ activeClasses: activeClasses.length, totalStudents: students.size, averageEngagement: reportScores.length ? Math.round(reportScores.reduce((sum, value) => sum + value, 0) / reportScores.length) : 0 });
       } else {
-        // Fetch enrolled classes for student
-        const { data, error } = await supabase
-          .from('class_enrollments')
-          .select(`
-            *,
-            classes (
-              *,
-              profiles:teacher_id (
-                full_name
-              )
-            )
-          `)
-          .eq('student_id', user?.id);
-
+        const { data, error } = await supabase.from("class_enrollments").select("id, status, classes(*)").eq("student_id", user.id).order("enrolled_at", { ascending: false });
         if (error) throw error;
-        setEnrolledClasses(data || []);
+        setEnrollments((data ?? []) as unknown as StudentEnrollment[]);
       }
     } catch (error) {
-      console.error('Error fetching classes:', error);
-    } finally {
-      setDataLoading(false);
-    }
-  };
+      toast({ title: "Dashboard unavailable", description: error instanceof Error ? error.message : "Unable to load dashboard", variant: "destructive" });
+    } finally { setLoading(false); }
+  }, [role, toast, user]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
+  useEffect(() => { void fetchDashboard(); }, [fetchDashboard]);
 
-  if (!user || !profile) {
-    return null;
-  }
-
-  return (
-    <div className="space-y-8">
-        {role === 'teacher' ? (
-          <>
-            {/* Stats Overview */}
-            <div className="grid gap-4 md:grid-cols-3 mb-8">
-              <Card className="shadow-soft">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Active Classes</CardTitle>
-                  <Video className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">3</div>
-                  <p className="text-xs text-muted-foreground">+1 from last semester</p>
-                </CardContent>
-              </Card>
-              <Card className="shadow-soft">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Students</CardTitle>
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">135</div>
-                  <p className="text-xs text-muted-foreground">Across all classes</p>
-                </CardContent>
-              </Card>
-              <Card className="shadow-soft">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Avg. Engagement</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">82%</div>
-                  <p className="text-xs text-success">+5% from last week</p>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Classes Section */}
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-3xl font-bold">Your Classes</h2>
-              <CreateClassDialog onClassCreated={fetchClasses} />
-            </div>
-
-            {dataLoading ? (
-              <div className="flex justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              </div>
-            ) : classes.length === 0 ? (
-              <Card className="shadow-soft">
-                <CardContent className="flex flex-col items-center justify-center py-12">
-                  <GraduationCap className="h-16 w-16 text-muted-foreground mb-4" />
-                  <h3 className="text-xl font-semibold mb-2">No classes yet</h3>
-                  <p className="text-muted-foreground mb-4">Create your first class to get started</p>
-                  <CreateClassDialog onClassCreated={fetchClasses} />
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {classes.map((cls) => (
-                  <ClassCard
-                    key={cls.id}
-                    classData={cls}
-                    isTeacher={true}
-                    studentCount={0}
-                    engagementScore={75}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            {/* Student View */}
-            <div className="mb-8">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-3xl font-bold">My Classes</h2>
-                <Button onClick={() => navigate('/browse')} variant="outline">
-                  Browse All Classes
-                </Button>
-              </div>
-              {dataLoading ? (
-                <div className="flex justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                </div>
-              ) : enrolledClasses.length === 0 ? (
-                <Card className="shadow-soft">
-                  <CardContent className="flex flex-col items-center justify-center py-12">
-                    <GraduationCap className="h-16 w-16 text-muted-foreground mb-4" />
-                    <h3 className="text-xl font-semibold mb-2">No enrolled classes</h3>
-                    <p className="text-muted-foreground">Browse available classes to enroll</p>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                  {enrolledClasses.map((enrollment) => (
-                    <ClassCard
-                      key={enrollment.id}
-                      classData={enrollment.classes}
-                      isTeacher={false}
-                      engagementScore={78}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-    </div>
+  if (accountError || !profile || !role) return (
+    <Card className="mx-auto max-w-xl">
+      <CardContent className="flex flex-col items-center py-12 text-center">
+        <CircleAlert className="mb-4 h-12 w-12 text-destructive" />
+        <h1 className="text-xl font-semibold">Account setup is incomplete</h1>
+        <p className="mt-2 max-w-md text-sm text-muted-foreground">
+          {accountError ?? "Your profile or account role could not be loaded."}
+        </p>
+        <Button className="mt-5" onClick={() => void refreshProfile()}>
+          <RefreshCw className="mr-2 h-4 w-4" />Retry account setup
+        </Button>
+      </CardContent>
+    </Card>
   );
-};
 
-export default Dashboard;
+  if (loading) return <div className="grid min-h-[50vh] place-items-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+
+  return <div className="space-y-8">
+    <div><p className="text-sm font-medium text-primary">Welcome back</p><h1 className="text-3xl font-bold tracking-tight">{profile.full_name}</h1><p className="text-muted-foreground">{role === "teacher" ? "Manage classes and monitor learning outcomes." : "Continue learning and join your upcoming sessions."}</p></div>
+    {role === "teacher" ? <>
+      <div className="grid gap-4 md:grid-cols-3">
+        {[
+          { label: "Active classes", value: stats.activeClasses, note: "Currently available", icon: Video },
+          { label: "Total students", value: stats.totalStudents, note: "Unique active enrollments", icon: Users },
+          { label: "Average engagement", value: `${stats.averageEngagement}%`, note: stats.averageEngagement ? "Across completed reports" : "No completed reports yet", icon: TrendingUp },
+        ].map((item) => <Card key={item.label}><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium">{item.label}</CardTitle><item.icon className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{item.value}</div><p className="text-xs text-muted-foreground">{item.note}</p></CardContent></Card>)}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-bold">Your classes</h2><p className="text-sm text-muted-foreground">Create, schedule, and review each classroom.</p></div><CreateClassDialog onClassCreated={fetchDashboard} /></div>
+      {classes.filter((item) => !item.archived_at).length ? <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">{classes.filter((item) => !item.archived_at).map((item) => <ClassCard key={item.id} classData={item} isTeacher studentCount={item.student_count} engagementScore={item.engagement_score ?? 0} />)}</div> : <EmptyState title="No active classes" body="Create your first class or restore an archived class." action={<CreateClassDialog onClassCreated={fetchDashboard} />} />}
+      {classes.some((item) => item.archived_at) ? <div className="space-y-3"><h2 className="text-xl font-semibold">Archived classes</h2><div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">{classes.filter((item) => item.archived_at).map((item) => <ClassCard key={item.id} classData={item} isTeacher studentCount={item.student_count} engagementScore={item.engagement_score ?? 0} />)}</div></div> : null}
+    </> : <>
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-bold">My classes</h2><p className="text-sm text-muted-foreground">Active classes and enrollment requests.</p></div><Button onClick={() => navigate("/browse")}><BookOpen className="mr-2 h-4 w-4" />Browse classes</Button></div>
+      {enrollments.length ? <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">{enrollments.map((item) => item.classes ? <div key={item.id} className="space-y-2"><ClassCard classData={item.classes} isTeacher={false} /><p className="text-center text-xs capitalize text-muted-foreground">Enrollment: {item.status}</p></div> : null)}</div> : <EmptyState title="No enrolled classes" body="Browse the catalogue to enroll or request access." action={<Button onClick={() => navigate("/browse")}>Browse classes</Button>} />}
+    </>}
+  </div>;
+}
+
+function EmptyState({ title, body, action }: { title: string; body: string; action: React.ReactNode }) {
+  return <Card><CardContent className="flex flex-col items-center py-12 text-center"><GraduationCap className="mb-4 h-14 w-14 text-muted-foreground" /><h3 className="text-xl font-semibold">{title}</h3><p className="mb-5 text-muted-foreground">{body}</p>{action}</CardContent></Card>;
+}

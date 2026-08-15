@@ -13,6 +13,8 @@ import { Label } from "@/components/ui/label";
 import { Calendar, Clock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { EngagementMode } from "@/types/domain";
 
 interface ScheduleSessionDialogProps {
   classId: string;
@@ -25,6 +27,7 @@ export const ScheduleSessionDialog = ({ classId, onSessionScheduled }: ScheduleS
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
   const [duration, setDuration] = useState("60");
+  const [engagementMode, setEngagementMode] = useState<EngagementMode>("lecture");
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
@@ -42,7 +45,8 @@ export const ScheduleSessionDialog = ({ classId, onSessionScheduled }: ScheduleS
           title,
           scheduled_at: scheduledAt.toISOString(),
           duration_minutes: parseInt(duration),
-          status: 'scheduled'
+          status: 'scheduled',
+          engagement_mode: engagementMode,
         });
 
       if (error) throw error;
@@ -56,12 +60,13 @@ export const ScheduleSessionDialog = ({ classId, onSessionScheduled }: ScheduleS
       setScheduledDate("");
       setScheduledTime("");
       setDuration("60");
+      setEngagementMode("lecture");
       setOpen(false);
       onSessionScheduled();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error instanceof Error ? error.message : "Could not schedule the session.",
         variant: "destructive",
       });
     } finally {
@@ -128,6 +133,13 @@ export const ScheduleSessionDialog = ({ classId, onSessionScheduled }: ScheduleS
               onChange={(e) => setDuration(e.target.value)}
               required
             />
+          </div>
+          <div className="space-y-2">
+            <Label>Engagement mode</Label>
+            <Select value={engagementMode} onValueChange={(value: EngagementMode) => setEngagementMode(value)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="lecture">Lecture — attention and focus</SelectItem><SelectItem value="interactive">Interactive — includes speaking participation</SelectItem></SelectContent>
+            </Select>
           </div>
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? "Scheduling..." : "Schedule Session"}
