@@ -20,6 +20,12 @@ export function useSpeechParticipation(stream: MediaStream | null, enabled: bool
     const processor = context.createScriptProcessor(4096, 1, 1);
     const silentGain = context.createGain(); silentGain.gain.value = 0;
     const worker = new Worker(new URL("../workers/speech.worker.ts", import.meta.url), { type: "module" });
+    const resumeAudio = () => {
+      if (context.state === "suspended") void context.resume();
+    };
+    resumeAudio();
+    window.addEventListener("pointerdown", resumeAudio, { passive: true });
+    window.addEventListener("keydown", resumeAudio);
     let chunks: Float32Array[] = [];
     let samples = 0;
     let speaking = false;
@@ -47,7 +53,11 @@ export function useSpeechParticipation(stream: MediaStream | null, enabled: bool
       }
     };
     source.connect(processor); processor.connect(silentGain); silentGain.connect(context.destination);
-    return () => { processor.disconnect(); source.disconnect(); silentGain.disconnect(); worker.terminate(); void context.close(); };
+    return () => {
+      window.removeEventListener("pointerdown", resumeAudio);
+      window.removeEventListener("keydown", resumeAudio);
+      processor.disconnect(); source.disconnect(); silentGain.disconnect(); worker.terminate(); void context.close();
+    };
   }, [enabled, stream]);
 
   return useCallback(() => {

@@ -17,6 +17,8 @@ export function EngagementTracker({ sessionId, mediaStream }: { sessionId: strin
   const counters = useRef({ faceSamples: 0, presentSamples: 0, attentiveSamples: 0, confidence: 0, focusSeconds: 0 });
   const [metrics, setMetrics] = useState<EngagementSnapshot>(EMPTY);
   const [tracking, setTracking] = useState(false);
+  const [trackingError, setTrackingError] = useState<string | null>(null);
+  const [sampleCount, setSampleCount] = useState(0);
   const [nudge, setNudge] = useState(false);
   const consumeSpeech = useSpeechParticipation(mediaStream, role === "student");
 
@@ -40,15 +42,30 @@ export function EngagementTracker({ sessionId, mediaStream }: { sessionId: strin
       const voice = Math.min(100, Math.round((speech.speakingSeconds / 10) * 70 + speech.speakingTurns * 10));
       const payload = { session_id: sessionId, attention_score: attention, screen_focus_score: screenFocus, voice_activity_score: voice, face_present: current.presentSamples > 0, camera_enabled: mediaStream.getVideoTracks().some((track) => track.enabled), speaking_seconds: speech.speakingSeconds, speaking_turns: speech.speakingTurns, word_count: speech.wordCount, signal_confidence: current.faceSamples ? Math.round(current.confidence / current.faceSamples) : 0 };
       counters.current = { faceSamples: 0, presentSamples: 0, attentiveSamples: 0, confidence: 0, focusSeconds: 0 };
-      void supabase.functions.invoke("ingest-engagement", { body: payload }).then(({ data, error }) => {
-        if (!error && data?.metrics) { setMetrics({ ...data.metrics, facePresent: payload.face_present, confidence: payload.signal_confidence, speakingSeconds: payload.speaking_seconds, speakingTurns: payload.speaking_turns, wordCount: payload.word_count }); setNudge(Boolean(data.nudge)); }
+      void supabase.functions.invoke("ingest-engagement", { body: payload }).then(async ({ data, error }) => {
+        if (error || !data?.metrics) {
+          let message = data?.error ?? error?.message ?? "Engagement metrics were not accepted.";
+          const response = (error as { context?: Response } | null)?.context;
+          if (response) {
+            try {
+              const body = await response.clone().json() as { error?: string };
+              message = body.error ?? message;
+            } catch { /* Keep the SDK error when the response is not JSON. */ }
+          }
+          setTrackingError(message);
+          return;
+        }
+        setTrackingError(null);
+        setSampleCount((count) => count + 1);
+        setMetrics({ ...data.metrics, facePresent: payload.face_present, confidence: payload.signal_confidence, speakingSeconds: payload.speaking_seconds, speakingTurns: payload.speaking_turns, wordCount: payload.word_count });
+        setNudge(Boolean(data.nudge));
       });
     }, 30_000);
     return () => { clearInterval(focusTimer); clearInterval(faceTimer); clearInterval(reportTimer); setTracking(false); video.srcObject = null; };
   }, [consumeSpeech, mediaStream, role, sessionId]);
 
   if (role !== "student") return null;
-  return <Card><video ref={videoRef} muted playsInline className="hidden" /><CardHeader className="pb-3"><div className="flex items-center justify-between"><CardTitle className="text-base">Your engagement</CardTitle><Badge variant="outline"><Activity className={`mr-1 h-3 w-3 ${tracking ? "animate-pulse" : ""}`} />{tracking ? "Private tracking" : "Unavailable"}</Badge></div></CardHeader><CardContent className="space-y-4">{nudge ? <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><strong>Quick check-in:</strong> refocus on the class window and adjust your camera if needed.</div> : null}<Metric icon={Activity} label="Overall" value={metrics.overall} /><Metric icon={Eye} label="Attention" value={metrics.attention} /><Metric icon={Monitor} label="Screen focus" value={metrics.screenFocus} /><Metric icon={Mic} label="Participation" value={metrics.voice} /><p className="text-xs text-muted-foreground">Only numeric summaries leave this device. Audio, video frames, and transcript text are not stored.</p></CardContent></Card>;
+  return <Card><video ref={videoRef} muted playsInline className="hidden" /><CardHeader className="pb-3"><div className="flex items-center justify-between"><CardTitle className="text-base">Your engagement</CardTitle><Badge variant="outline"><Activity className={`mr-1 h-3 w-3 ${tracking ? "animate-pulse" : ""}`} />{tracking ? "Private tracking" : "Unavailable"}</Badge></div></CardHeader><CardContent className="space-y-4">{trackingError ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"><strong>Tracking upload failed:</strong> {trackingError}</div> : null}{nudge ? <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><strong>Quick check-in:</strong> refocus on the class window and adjust your camera if needed.</div> : null}<Metric icon={Activity} label="Overall" value={metrics.overall} /><Metric icon={Eye} label="Attention" value={metrics.attention} /><Metric icon={Monitor} label="Screen focus" value={metrics.screenFocus} /><Metric icon={Mic} label="Participation" value={metrics.voice} /><p className="text-xs text-muted-foreground">{sampleCount ? `${sampleCount} encrypted numeric sample${sampleCount === 1 ? "" : "s"} sent this session.` : "The first numeric sample is sent after 30 seconds."} Audio, video frames, and transcript text are not stored.</p></CardContent></Card>;
 }
 
 function Metric({ icon: Icon, label, value }: { icon: typeof Activity; label: string; value: number }) { return <div className="space-y-1"><div className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Icon className="h-3.5 w-3.5 text-muted-foreground" />{label}</span><strong>{value}%</strong></div><Progress value={value} className="h-1.5" /></div>; }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { BarChart3, Loader2, MessageSquare, Phone, ShieldCheck, Users } from "lucide-react";
 import { Track } from "livekit-client";
@@ -105,8 +105,12 @@ function ClassroomView({ session, verificationMethod }: { session: SessionContex
   const { user, role, profile } = useAuth(); const navigate = useNavigate(); const { toast } = useToast(); const room = useRoomContext();
   const { localParticipant } = useLocalParticipant(); const [showChat, setShowChat] = useState(true); const [ending, setEnding] = useState(false);
   const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }, { source: Track.Source.ScreenShare, withPlaceholder: false }], { onlySubscribed: false });
-  const mediaTracks = [Track.Source.Camera, Track.Source.Microphone].map((source) => localParticipant.getTrackPublication(source)?.track?.mediaStreamTrack).filter((track): track is MediaStreamTrack => Boolean(track));
-  const mediaStream = mediaTracks.length ? new MediaStream(mediaTracks) : null;
+  const cameraTrack = localParticipant.getTrackPublication(Track.Source.Camera)?.track?.mediaStreamTrack;
+  const microphoneTrack = localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.mediaStreamTrack;
+  const mediaStream = useMemo(() => {
+    const localTracks = [cameraTrack, microphoneTrack].filter((track): track is MediaStreamTrack => Boolean(track));
+    return localTracks.length ? new MediaStream(localTracks) : null;
+  }, [cameraTrack, microphoneTrack]);
   const isTeacher = role === "teacher" && session.classes.teacher_id === user?.id;
 
   useEffect(() => {
