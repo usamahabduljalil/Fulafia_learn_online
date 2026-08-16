@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface CreateAssignmentDialogProps {
   open: boolean;
@@ -19,6 +20,8 @@ export function CreateAssignmentDialog({ open, onOpenChange, classId }: CreateAs
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [points, setPoints] = useState("100");
+  const [allowLate, setAllowLate] = useState(false);
+  const [allowResubmission, setAllowResubmission] = useState(true);
   const [loading, setLoading] = useState(false);
   const { user } = useAuth();
   const { toast } = useToast();
@@ -38,6 +41,8 @@ export function CreateAssignmentDialog({ open, onOpenChange, classId }: CreateAs
           due_date: dueDate ? new Date(dueDate).toISOString() : null,
           points: parseInt(points),
           created_by: user.id,
+          allow_late_submissions: allowLate,
+          allow_resubmission: allowResubmission,
         });
 
       if (error) throw error;
@@ -51,11 +56,13 @@ export function CreateAssignmentDialog({ open, onOpenChange, classId }: CreateAs
       setDescription("");
       setDueDate("");
       setPoints("100");
+      setAllowLate(false);
+      setAllowResubmission(true);
       onOpenChange(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error instanceof Error ? error.message : "Could not create the assignment.",
         variant: "destructive",
       });
     } finally {
@@ -114,6 +121,11 @@ export function CreateAssignmentDialog({ open, onOpenChange, classId }: CreateAs
                 required
               />
             </div>
+          </div>
+
+          <div className="space-y-3 rounded-lg border p-3">
+            <label className="flex items-center gap-2 text-sm"><Checkbox checked={allowLate} onCheckedChange={(value) => setAllowLate(value === true)} />Allow submissions after the due date</label>
+            <label className="flex items-center gap-2 text-sm"><Checkbox checked={allowResubmission} onCheckedChange={(value) => setAllowResubmission(value === true)} />Allow students to update ungraded submissions</label>
           </div>
 
           <div className="flex justify-end gap-2">

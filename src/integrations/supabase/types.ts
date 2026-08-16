@@ -23,6 +23,7 @@ export type Database = {
           graded_at: string | null
           id: string
           student_id: string
+          storage_path: string | null
           submission_text: string | null
           submitted_at: string
         }
@@ -34,6 +35,7 @@ export type Database = {
           graded_at?: string | null
           id?: string
           student_id: string
+          storage_path?: string | null
           submission_text?: string | null
           submitted_at?: string
         }
@@ -45,6 +47,7 @@ export type Database = {
           graded_at?: string | null
           id?: string
           student_id?: string
+          storage_path?: string | null
           submission_text?: string | null
           submitted_at?: string
         }
@@ -67,6 +70,8 @@ export type Database = {
       }
       assignments: {
         Row: {
+          allow_late_submissions: boolean
+          allow_resubmission: boolean
           class_id: string
           created_at: string
           created_by: string
@@ -78,6 +83,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          allow_late_submissions?: boolean
+          allow_resubmission?: boolean
           class_id: string
           created_at?: string
           created_by: string
@@ -89,6 +96,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          allow_late_submissions?: boolean
+          allow_resubmission?: boolean
           class_id?: string
           created_at?: string
           created_by?: string
@@ -121,18 +130,27 @@ export type Database = {
           class_id: string
           enrolled_at: string
           id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: Database["public"]["Enums"]["enrollment_status"]
           student_id: string
         }
         Insert: {
           class_id: string
           enrolled_at?: string
           id?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["enrollment_status"]
           student_id: string
         }
         Update: {
           class_id?: string
           enrolled_at?: string
           id?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["enrollment_status"]
           student_id?: string
         }
         Relationships: [
@@ -160,6 +178,7 @@ export type Database = {
           file_url: string | null
           id: string
           resource_type: string
+          storage_path: string | null
           title: string
           updated_at: string
           uploaded_by: string
@@ -171,6 +190,7 @@ export type Database = {
           file_url?: string | null
           id?: string
           resource_type?: string
+          storage_path?: string | null
           title: string
           updated_at?: string
           uploaded_by: string
@@ -182,6 +202,7 @@ export type Database = {
           file_url?: string | null
           id?: string
           resource_type?: string
+          storage_path?: string | null
           title?: string
           updated_at?: string
           uploaded_by?: string
@@ -208,10 +229,14 @@ export type Database = {
           class_id: string
           created_at: string
           duration_minutes: number
+          ended_at: string | null
+          engagement_mode: Database["public"]["Enums"]["engagement_mode"]
           id: string
           meeting_url: string | null
+          livekit_room_name: string
           scheduled_at: string
-          status: string
+          status: Database["public"]["Enums"]["session_status"]
+          started_at: string | null
           title: string
           updated_at: string
         }
@@ -219,10 +244,14 @@ export type Database = {
           class_id: string
           created_at?: string
           duration_minutes?: number
+          ended_at?: string | null
+          engagement_mode?: Database["public"]["Enums"]["engagement_mode"]
           id?: string
           meeting_url?: string | null
+          livekit_room_name?: string
           scheduled_at: string
-          status?: string
+          status?: Database["public"]["Enums"]["session_status"]
+          started_at?: string | null
           title: string
           updated_at?: string
         }
@@ -230,10 +259,14 @@ export type Database = {
           class_id?: string
           created_at?: string
           duration_minutes?: number
+          ended_at?: string | null
+          engagement_mode?: Database["public"]["Enums"]["engagement_mode"]
           id?: string
           meeting_url?: string | null
+          livekit_room_name?: string
           scheduled_at?: string
-          status?: string
+          status?: Database["public"]["Enums"]["session_status"]
+          started_at?: string | null
           title?: string
           updated_at?: string
         }
@@ -249,6 +282,8 @@ export type Database = {
       }
       classes: {
         Row: {
+          access_mode: Database["public"]["Enums"]["class_access_mode"]
+          archived_at: string | null
           created_at: string
           description: string | null
           id: string
@@ -257,6 +292,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          access_mode?: Database["public"]["Enums"]["class_access_mode"]
+          archived_at?: string | null
           created_at?: string
           description?: string | null
           id?: string
@@ -265,6 +302,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          access_mode?: Database["public"]["Enums"]["class_access_mode"]
+          archived_at?: string | null
           created_at?: string
           description?: string | null
           id?: string
@@ -285,33 +324,57 @@ export type Database = {
       engagement_metrics: {
         Row: {
           attention_score: number | null
+          camera_enabled: boolean | null
+          face_present: boolean | null
           id: string
+          interval_seconds: number
+          nudge_triggered: boolean
           overall_engagement_score: number | null
           recorded_at: string
           screen_focus_score: number | null
+          signal_confidence: number | null
           session_id: string
           student_id: string
+          speaking_seconds: number
+          speaking_turns: number
           voice_activity_score: number | null
+          word_count: number
         }
         Insert: {
           attention_score?: number | null
+          camera_enabled?: boolean | null
+          face_present?: boolean | null
           id?: string
+          interval_seconds?: number
+          nudge_triggered?: boolean
           overall_engagement_score?: number | null
           recorded_at?: string
           screen_focus_score?: number | null
+          signal_confidence?: number | null
           session_id: string
           student_id: string
+          speaking_seconds?: number
+          speaking_turns?: number
           voice_activity_score?: number | null
+          word_count?: number
         }
         Update: {
           attention_score?: number | null
+          camera_enabled?: boolean | null
+          face_present?: boolean | null
           id?: string
+          interval_seconds?: number
+          nudge_triggered?: boolean
           overall_engagement_score?: number | null
           recorded_at?: string
           screen_focus_score?: number | null
+          signal_confidence?: number | null
           session_id?: string
           student_id?: string
+          speaking_seconds?: number
+          speaking_turns?: number
           voice_activity_score?: number | null
+          word_count?: number
         }
         Relationships: [
           {
@@ -359,28 +422,37 @@ export type Database = {
       }
       session_attendance: {
         Row: {
+          connection_id: string | null
           duration_minutes: number | null
+          duration_seconds: number | null
           id: string
           joined_at: string
           left_at: string | null
           session_id: string
           student_id: string
+          verification_method: string
         }
         Insert: {
+          connection_id?: string | null
           duration_minutes?: number | null
+          duration_seconds?: number | null
           id?: string
           joined_at?: string
           left_at?: string | null
           session_id: string
           student_id: string
+          verification_method?: string
         }
         Update: {
+          connection_id?: string | null
           duration_minutes?: number | null
+          duration_seconds?: number | null
           id?: string
           joined_at?: string
           left_at?: string | null
           session_id?: string
           student_id?: string
+          verification_method?: string
         }
         Relationships: [
           {
@@ -424,6 +496,48 @@ export type Database = {
           },
         ]
       }
+      class_invites: {
+        Row: { class_id: string; code_hash: string; created_at: string; created_by: string; expires_at: string | null; id: string; max_uses: number | null; use_count: number }
+        Insert: { class_id: string; code_hash: string; created_at?: string; created_by: string; expires_at?: string | null; id?: string; max_uses?: number | null; use_count?: number }
+        Update: { class_id?: string; code_hash?: string; created_at?: string; created_by?: string; expires_at?: string | null; id?: string; max_uses?: number | null; use_count?: number }
+        Relationships: []
+      }
+      intervention_events: {
+        Row: { acknowledged_at: string | null; acknowledged_by: string | null; created_at: string; event_type: string; id: string; reason: string; score: number | null; session_id: string; student_id: string }
+        Insert: { acknowledged_at?: string | null; acknowledged_by?: string | null; created_at?: string; event_type: string; id?: string; reason: string; score?: number | null; session_id: string; student_id: string }
+        Update: { acknowledged_at?: string | null; acknowledged_by?: string | null; created_at?: string; event_type?: string; id?: string; reason?: string; score?: number | null; session_id?: string; student_id?: string }
+        Relationships: []
+      }
+      session_access_overrides: {
+        Row: { created_at: string; expires_at: string; granted_by: string; id: string; reason: string; session_id: string; student_id: string }
+        Insert: { created_at?: string; expires_at: string; granted_by: string; id?: string; reason: string; session_id: string; student_id: string }
+        Update: { created_at?: string; expires_at?: string; granted_by?: string; id?: string; reason?: string; session_id?: string; student_id?: string }
+        Relationships: []
+      }
+      session_biometric_verifications: {
+        Row: { expires_at: string; session_id: string; student_id: string; verified_at: string }
+        Insert: { expires_at: string; session_id: string; student_id: string; verified_at?: string }
+        Update: { expires_at?: string; session_id?: string; student_id?: string; verified_at?: string }
+        Relationships: []
+      }
+      student_biometrics: {
+        Row: { consented_at: string; encrypted_descriptor: string; encryption_iv: string; enrolled_at: string; model_version: string; updated_at: string; user_id: string }
+        Insert: { consented_at: string; encrypted_descriptor: string; encryption_iv: string; enrolled_at?: string; model_version: string; updated_at?: string; user_id: string }
+        Update: { consented_at?: string; encrypted_descriptor?: string; encryption_iv?: string; enrolled_at?: string; model_version?: string; updated_at?: string; user_id?: string }
+        Relationships: []
+      }
+      student_session_reports: {
+        Row: { alerts_count: number; attendance_seconds: number; average_attention: number | null; average_overall: number | null; average_screen_focus: number | null; average_voice_activity: number | null; generated_at: string; id: string; nudges_count: number; overrides_count: number; session_id: string; speaking_seconds: number; speaking_turns: number; student_id: string; timeline: Json; word_count: number }
+        Insert: { alerts_count?: number; attendance_seconds?: number; average_attention?: number | null; average_overall?: number | null; average_screen_focus?: number | null; average_voice_activity?: number | null; generated_at?: string; id?: string; nudges_count?: number; overrides_count?: number; session_id: string; speaking_seconds?: number; speaking_turns?: number; student_id: string; timeline?: Json; word_count?: number }
+        Update: { alerts_count?: number; attendance_seconds?: number; average_attention?: number | null; average_overall?: number | null; average_screen_focus?: number | null; average_voice_activity?: number | null; generated_at?: string; id?: string; nudges_count?: number; overrides_count?: number; session_id?: string; speaking_seconds?: number; speaking_turns?: number; student_id?: string; timeline?: Json; word_count?: number }
+        Relationships: []
+      }
+      teacher_invites: {
+        Row: { code_hash: string; created_at: string; expires_at: string; id: string; used_at: string | null; used_by: string | null }
+        Insert: { code_hash: string; created_at?: string; expires_at: string; id?: string; used_at?: string | null; used_by?: string | null }
+        Update: { code_hash?: string; created_at?: string; expires_at?: string; id?: string; used_at?: string | null; used_by?: string | null }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -450,6 +564,11 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_class_invite: {
+        Args: { _class_id: string; _code: string; _expires_at?: string | null; _max_uses?: number | null }
+        Returns: string
+      }
+      finalize_session_reports: { Args: { _session_id: string }; Returns: number }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]
@@ -461,9 +580,15 @@ export type Database = {
         }
         Returns: boolean
       }
+      redeem_teacher_invite: { Args: { _code: string }; Returns: Database["public"]["Enums"]["app_role"] }
+      request_class_enrollment: { Args: { _class_id: string; _invite_code?: string | null }; Returns: Database["public"]["Enums"]["enrollment_status"] }
     }
     Enums: {
       app_role: "teacher" | "student"
+      class_access_mode: "public" | "invite" | "approval"
+      engagement_mode: "lecture" | "interactive"
+      enrollment_status: "pending" | "active" | "rejected"
+      session_status: "scheduled" | "active" | "completed" | "cancelled"
       user_role: "teacher" | "student"
     }
     CompositeTypes: {
@@ -593,6 +718,10 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["teacher", "student"],
+      class_access_mode: ["public", "invite", "approval"],
+      engagement_mode: ["lecture", "interactive"],
+      enrollment_status: ["pending", "active", "rejected"],
+      session_status: ["scheduled", "active", "completed", "cancelled"],
       user_role: ["teacher", "student"],
     },
   },

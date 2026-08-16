@@ -8,11 +8,15 @@ import { Upload } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import type { Database } from "@/integrations/supabase/types";
+
+type Assignment = Database["public"]["Tables"]["assignments"]["Row"];
 
 interface SubmitAssignmentDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  assignment: any;
+  assignment: Assignment;
+  existingSubmission?: { id: string; submission_text: string | null; storage_path?: string | null; file_url?: string | null } | null;
   onSubmitSuccess: () => void;
 }
 
@@ -20,9 +24,10 @@ export function SubmitAssignmentDialog({
   open,
   onOpenChange,
   assignment,
+  existingSubmission,
   onSubmitSuccess,
 }: SubmitAssignmentDialogProps) {
-  const [submissionText, setSubmissionText] = useState("");
+  const [submissionText, setSubmissionText] = useState(existingSubmission?.submission_text ?? "");
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const { user } = useAuth();
@@ -39,13 +44,14 @@ export function SubmitAssignmentDialog({
     if (!user) return;
 
     setLoading(true);
+    let uploadedPath: string | null = null;
     try {
-      let fileUrl = '';
+      let storagePath = existingSubmission?.storage_path ?? '';
 
       // Upload file to storage if provided
       if (file) {
         const fileExt = file.name.split('.').pop();
-        const fileName = `${user.id}/${assignment.id}-${Date.now()}.${fileExt}`;
+        const fileName = `${user.id}/${assignment.id}/${crypto.randomUUID()}.${fileExt}`;
         
         const { error: uploadError } = await supabase.storage
           .from('assignment-submissions')
@@ -53,38 +59,41 @@ export function SubmitAssignmentDialog({
 
         if (uploadError) throw uploadError;
 
-        // Get the URL (not public, access controlled by RLS)
-        const { data: { publicUrl } } = supabase.storage
-          .from('assignment-submissions')
-          .getPublicUrl(fileName);
-        
-        fileUrl = publicUrl;
+        storagePath = fileName;
+        uploadedPath = fileName;
       }
 
       const { error } = await supabase
         .from('assignment_submissions')
-        .insert({
+        .upsert({
           assignment_id: assignment.id,
           student_id: user.id,
           submission_text: submissionText,
-          file_url: fileUrl || null,
-        });
+          file_url: null,
+          storage_path: storagePath || null,
+          submitted_at: new Date().toISOString(),
+        }, { onConflict: 'assignment_id,student_id' });
 
       if (error) throw error;
 
+      if (uploadedPath && existingSubmission?.storage_path && existingSubmission.storage_path !== uploadedPath) {
+        await supabase.storage.from('assignment-submissions').remove([existingSubmission.storage_path]);
+      }
+
       toast({
         title: "Success",
-        description: "Assignment submitted successfully",
+        description: existingSubmission ? "Submission updated successfully" : "Assignment submitted successfully",
       });
 
       setSubmissionText("");
       setFile(null);
       onOpenChange(false);
       onSubmitSuccess();
-    } catch (error: any) {
+    } catch (error: unknown) {
+      if (uploadedPath) await supabase.storage.from('assignment-submissions').remove([uploadedPath]);
       toast({
         title: "Error",
-        description: error.message,
+        description: error instanceof Error ? error.message : "Could not submit the assignment.",
         variant: "destructive",
       });
     } finally {
@@ -139,7 +148,7 @@ export function SubmitAssignmentDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={loading}>
-              {loading ? "Submitting..." : "Submit Assignment"}
+              {loading ? "Submitting..." : existingSubmission ? "Update Submission" : "Submit Assignment"}
             </Button>
           </div>
         </form>

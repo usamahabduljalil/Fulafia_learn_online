@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,12 +9,34 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
+import { FaceEnrollmentCard } from '@/components/FaceEnrollmentCard';
 
 export default function Profile() {
-  const { user, profile, role } = useAuth();
+  const { user, profile, role, refreshProfile } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [fullName, setFullName] = useState(profile?.full_name || '');
+  const [stats, setStats] = useState({ primary: 0, secondary: 0 });
+
+  useEffect(() => {
+    setFullName(profile?.full_name ?? '');
+  }, [profile?.full_name]);
+
+  useEffect(() => {
+    if (!user || !role) return;
+    if (role === 'teacher') {
+      void supabase.from('classes').select('id').eq('teacher_id', user.id).is('archived_at', null).then(async ({ data }) => {
+        const classIds = (data ?? []).map((item) => item.id);
+        const { count } = classIds.length ? await supabase.from('class_enrollments').select('student_id', { count: 'exact', head: true }).in('class_id', classIds).eq('status', 'active') : { count: 0 };
+        setStats({ primary: classIds.length, secondary: count ?? 0 });
+      });
+    } else {
+      void Promise.all([
+        supabase.from('class_enrollments').select('id', { count: 'exact', head: true }).eq('student_id', user.id).eq('status', 'active'),
+        supabase.from('assignment_submissions').select('id', { count: 'exact', head: true }).eq('student_id', user.id),
+      ]).then(([enrollments, submissions]) => setStats({ primary: enrollments.count ?? 0, secondary: submissions.count ?? 0 }));
+    }
+  }, [role, user]);
 
   const userInitials = profile?.full_name
     ?.split(' ')
@@ -40,12 +62,11 @@ export default function Profile() {
         description: 'Profile updated successfully',
       });
 
-      // Reload page to refresh profile data
-      window.location.reload();
-    } catch (error: any) {
+      await refreshProfile();
+    } catch (error: unknown) {
       toast({
         title: 'Error',
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Could not update the profile.',
         variant: 'destructive',
       });
     } finally {
@@ -113,6 +134,8 @@ export default function Profile() {
         </CardContent>
       </Card>
 
+      {role === 'student' ? <FaceEnrollmentCard /> : null}
+
       {/* Account Stats */}
       {role === 'teacher' && (
         <Card>
@@ -124,11 +147,11 @@ export default function Profile() {
             <div className="grid grid-cols-2 gap-4">
               <div className="p-4 rounded-lg border">
                 <p className="text-sm text-muted-foreground">Total Classes</p>
-                <p className="text-2xl font-bold">—</p>
+                <p className="text-2xl font-bold">{stats.primary}</p>
               </div>
               <div className="p-4 rounded-lg border">
                 <p className="text-sm text-muted-foreground">Total Students</p>
-                <p className="text-2xl font-bold">—</p>
+                <p className="text-2xl font-bold">{stats.secondary}</p>
               </div>
             </div>
           </CardContent>
@@ -145,11 +168,11 @@ export default function Profile() {
             <div className="grid grid-cols-2 gap-4">
               <div className="p-4 rounded-lg border">
                 <p className="text-sm text-muted-foreground">Enrolled Classes</p>
-                <p className="text-2xl font-bold">—</p>
+                <p className="text-2xl font-bold">{stats.primary}</p>
               </div>
               <div className="p-4 rounded-lg border">
                 <p className="text-sm text-muted-foreground">Assignments Completed</p>
-                <p className="text-2xl font-bold">—</p>
+                <p className="text-2xl font-bold">{stats.secondary}</p>
               </div>
             </div>
           </CardContent>

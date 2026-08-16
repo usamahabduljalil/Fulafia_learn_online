@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,7 @@ interface GradeSubmissionDialogProps {
     id: string;
     submission_text: string | null;
     file_url: string | null;
+    storage_path?: string | null;
     submitted_at: string;
     grade: number | null;
     feedback: string | null;
@@ -35,7 +36,15 @@ export const GradeSubmissionDialog = ({
   const [grade, setGrade] = useState(submission.grade?.toString() || '');
   const [feedback, setFeedback] = useState(submission.feedback || '');
   const [loading, setLoading] = useState(false);
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const { toast } = useToast();
+
+  useEffect(() => {
+    setSignedUrl(submission.file_url);
+    if (open && submission.storage_path) {
+      void supabase.storage.from('assignment-submissions').createSignedUrl(submission.storage_path, 300).then(({ data }) => setSignedUrl(data?.signedUrl ?? null));
+    }
+  }, [open, submission.file_url, submission.storage_path]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,10 +74,10 @@ export const GradeSubmissionDialog = ({
 
       onOpenChange(false);
       onGraded();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: 'Error',
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Could not save the grade.',
         variant: 'destructive',
       });
     } finally {
@@ -98,11 +107,11 @@ export const GradeSubmissionDialog = ({
               </>
             )}
             
-            {submission.file_url && (
+            {signedUrl && (
               <>
                 <p className="text-sm font-medium mt-4">Attached File:</p>
                 <a 
-                  href={submission.file_url}
+                  href={signedUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-sm text-primary hover:underline"

@@ -8,12 +8,12 @@ const Index = () => {
     {
       icon: Video,
       title: "HD Video Conferencing",
-      description: "Crystal-clear video and audio streaming powered by WebRTC technology"
+      description: "Multi-participant video, audio, screen sharing, and reconnection powered by LiveKit"
     },
     {
       icon: Brain,
-      title: "AI-Powered Analytics",
-      description: "Multi-agent system tracking voice, facial expressions, and screen activity"
+      title: "Privacy-First Analytics",
+      description: "Local, observable attention, screen-focus, and participation signals without emotion inference"
     },
     {
       icon: TrendingUp,
@@ -70,7 +70,7 @@ const Index = () => {
         <div className="text-center mb-16">
           <h2 className="text-4xl font-bold mb-4">Intelligent Virtual Classrooms</h2>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            Our multi-agent AI system monitors engagement in real-time, helping teachers create more effective learning experiences
+            FULAFIA combines secure live teaching, coursework, attendance, and advisory engagement insights in one place.
           </p>
         </div>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -94,7 +94,7 @@ const Index = () => {
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold mb-4">How It Works</h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Our multi-agent system analyzes multiple signals to provide comprehensive engagement insights
+              Student devices calculate observable signals locally and share only numeric summaries.
             </p>
           </div>
           <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
@@ -103,16 +103,16 @@ const Index = () => {
                 <div className="text-4xl font-bold text-primary mb-2">01</div>
                 <CardTitle>Voice Analysis</CardTitle>
                 <CardDescription>
-                  Tracks speaking frequency, duration, and tone to measure participation
+                  Tracks speaking time, turn count, and word count locally; audio and transcripts are discarded.
                 </CardDescription>
               </CardHeader>
             </Card>
             <Card className="shadow-soft">
               <CardHeader>
                 <div className="text-4xl font-bold text-primary mb-2">02</div>
-                <CardTitle>Facial Recognition</CardTitle>
+                <CardTitle>Presence &amp; Liveness</CardTitle>
                 <CardDescription>
-                  Monitors attention levels, emotions, and focus through facial analysis
+                  Verifies session access and estimates face presence and head direction without inferring emotion.
                 </CardDescription>
               </CardHeader>
             </Card>
@@ -137,10 +137,10 @@ const Index = () => {
               Ready to Transform Your Virtual Classroom?
             </h2>
             <p className="text-xl text-muted-foreground mb-8">
-              Join educators worldwide using AI to create more engaging online learning experiences
+              Bring live sessions, class resources, assignments, and thoughtful interventions into one secure workspace.
             </p>
             <Button size="lg" className="text-lg px-8" asChild>
-              <Link to="/register">Start Your Free Trial</Link>
+              <Link to="/register">Create a Student Account</Link>
             </Button>
           </CardContent>
         </Card>

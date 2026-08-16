@@ -1,0 +1,12 @@
+begin;
+select plan(8);
+select has_function('public', 'redeem_teacher_invite', array['text'], 'Teacher invite redemption exists');
+select has_function('public', 'request_class_enrollment', array['uuid', 'text'], 'Enrollment gate exists');
+select has_function('public', 'finalize_session_reports', array['uuid'], 'Report finalizer exists');
+select has_table('public', 'student_biometrics', 'Biometric table exists');
+select has_table('public', 'intervention_events', 'Intervention audit table exists');
+select has_table('public', 'student_session_reports', 'Summary report table exists');
+select col_is_pk('public', 'student_biometrics', 'user_id', 'One biometric enrollment per user');
+select policies_are('public', 'student_session_reports', array['Teachers view session reports'], 'Reports are teacher-only');
+select * from finish();
+rollback;

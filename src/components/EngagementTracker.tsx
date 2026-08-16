@@ -1,157 +1,71 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Activity, Eye, Mic, Monitor } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { TrendingUp, Activity, Eye, Mic } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { Progress } from "@/components/ui/progress";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { analyzeFaceAttention } from "@/lib/faceEngine";
+import { useSpeechParticipation } from "@/hooks/useSpeechParticipation";
+import type { EngagementSnapshot } from "@/types/domain";
 
-interface EngagementTrackerProps {
-  sessionId: string;
-}
+const EMPTY: EngagementSnapshot = { overall: 0, attention: 0, voice: 0, screenFocus: 0, facePresent: false, confidence: 0, speakingSeconds: 0, speakingTurns: 0, wordCount: 0 };
 
-export const EngagementTracker = ({ sessionId }: EngagementTrackerProps) => {
-  const { user } = useAuth();
-  const [metrics, setMetrics] = useState({
-    overall: 0,
-    attention: 0,
-    voice: 0,
-    screenFocus: 0
-  });
-  const [isTracking, setIsTracking] = useState(false);
+export function EngagementTracker({ sessionId, mediaStream }: { sessionId: string; mediaStream: MediaStream | null }) {
+  const { role } = useAuth();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const counters = useRef({ faceSamples: 0, presentSamples: 0, attentiveSamples: 0, confidence: 0, focusSeconds: 0 });
+  const [metrics, setMetrics] = useState<EngagementSnapshot>(EMPTY);
+  const [tracking, setTracking] = useState(false);
+  const [trackingError, setTrackingError] = useState<string | null>(null);
+  const [sampleCount, setSampleCount] = useState(0);
+  const [nudge, setNudge] = useState(false);
+  const consumeSpeech = useSpeechParticipation(mediaStream, role === "student");
 
   useEffect(() => {
-    startTracking();
-    const interval = setInterval(updateEngagement, 30000); // Update every 30 seconds
-
-    return () => {
-      clearInterval(interval);
-      stopTracking();
-    };
-  }, [sessionId]);
-
-  const startTracking = () => {
-    setIsTracking(true);
-    // Simulate initial engagement
-    updateEngagement();
-  };
-
-  const stopTracking = () => {
-    setIsTracking(false);
-  };
-
-  const updateEngagement = async () => {
-    // Simulate engagement metrics (in production, this would use actual tracking)
-    const attentionScore = Math.floor(Math.random() * 30) + 70; // 70-100
-    const voiceScore = Math.floor(Math.random() * 40) + 40; // 40-80
-    const screenFocusScore = Math.floor(Math.random() * 20) + 80; // 80-100
-    const overallScore = Math.floor((attentionScore + voiceScore + screenFocusScore) / 3);
-
-    setMetrics({
-      overall: overallScore,
-      attention: attentionScore,
-      voice: voiceScore,
-      screenFocus: screenFocusScore
-    });
-
-    // Save to database
-    try {
-      await supabase.from('engagement_metrics').insert({
-        session_id: sessionId,
-        student_id: user?.id,
-        overall_engagement_score: overallScore,
-        attention_score: attentionScore,
-        voice_activity_score: voiceScore,
-        screen_focus_score: screenFocusScore
+    if (role !== "student" || !mediaStream || !videoRef.current) return;
+    const video = videoRef.current; video.srcObject = mediaStream; void video.play(); setTracking(true);
+    const focusTimer = window.setInterval(() => { if (document.visibilityState === "visible" && document.hasFocus()) counters.current.focusSeconds += 1; }, 1000);
+    const faceTimer = window.setInterval(() => {
+      if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+      void analyzeFaceAttention(video).then((result) => {
+        counters.current.faceSamples += 1;
+        if (result.present) counters.current.presentSamples += 1;
+        if (result.present && result.facingForward) counters.current.attentiveSamples += 1;
+        counters.current.confidence += result.confidence;
+      }).catch(() => undefined);
+    }, 2000);
+    const reportTimer = window.setInterval(() => {
+      const speech = consumeSpeech(); const current = counters.current;
+      const attention = current.faceSamples ? Math.round((current.attentiveSamples / current.faceSamples) * 100) : 0;
+      const screenFocus = Math.min(100, Math.round((current.focusSeconds / 30) * 100));
+      const voice = Math.min(100, Math.round((speech.speakingSeconds / 10) * 70 + speech.speakingTurns * 10));
+      const payload = { session_id: sessionId, attention_score: attention, screen_focus_score: screenFocus, voice_activity_score: voice, face_present: current.presentSamples > 0, camera_enabled: mediaStream.getVideoTracks().some((track) => track.enabled), speaking_seconds: speech.speakingSeconds, speaking_turns: speech.speakingTurns, word_count: speech.wordCount, signal_confidence: current.faceSamples ? Math.round(current.confidence / current.faceSamples) : 0 };
+      counters.current = { faceSamples: 0, presentSamples: 0, attentiveSamples: 0, confidence: 0, focusSeconds: 0 };
+      void supabase.functions.invoke("ingest-engagement", { body: payload }).then(async ({ data, error }) => {
+        if (error || !data?.metrics) {
+          let message = data?.error ?? error?.message ?? "Engagement metrics were not accepted.";
+          const response = (error as { context?: Response } | null)?.context;
+          if (response) {
+            try {
+              const body = await response.clone().json() as { error?: string };
+              message = body.error ?? message;
+            } catch { /* Keep the SDK error when the response is not JSON. */ }
+          }
+          setTrackingError(message);
+          return;
+        }
+        setTrackingError(null);
+        setSampleCount((count) => count + 1);
+        setMetrics({ ...data.metrics, facePresent: payload.face_present, confidence: payload.signal_confidence, speakingSeconds: payload.speaking_seconds, speakingTurns: payload.speaking_turns, wordCount: payload.word_count });
+        setNudge(Boolean(data.nudge));
       });
-    } catch (error) {
-      console.error('Error saving engagement metrics:', error);
-    }
-  };
+    }, 30_000);
+    return () => { clearInterval(focusTimer); clearInterval(faceTimer); clearInterval(reportTimer); setTracking(false); video.srcObject = null; };
+  }, [consumeSpeech, mediaStream, role, sessionId]);
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return "text-success";
-    if (score >= 60) return "text-warning";
-    return "text-destructive";
-  };
+  if (role !== "student") return null;
+  return <Card><video ref={videoRef} muted playsInline className="hidden" /><CardHeader className="pb-3"><div className="flex items-center justify-between"><CardTitle className="text-base">Your engagement</CardTitle><Badge variant="outline"><Activity className={`mr-1 h-3 w-3 ${tracking ? "animate-pulse" : ""}`} />{tracking ? "Private tracking" : "Unavailable"}</Badge></div></CardHeader><CardContent className="space-y-4">{trackingError ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"><strong>Tracking upload failed:</strong> {trackingError}</div> : null}{nudge ? <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><strong>Quick check-in:</strong> refocus on the class window and adjust your camera if needed.</div> : null}<Metric icon={Activity} label="Overall" value={metrics.overall} /><Metric icon={Eye} label="Attention" value={metrics.attention} /><Metric icon={Monitor} label="Screen focus" value={metrics.screenFocus} /><Metric icon={Mic} label="Participation" value={metrics.voice} /><p className="text-xs text-muted-foreground">{sampleCount ? `${sampleCount} encrypted numeric sample${sampleCount === 1 ? "" : "s"} sent this session.` : "The first numeric sample is sent after 30 seconds."} Audio, video frames, and transcript text are not stored.</p></CardContent></Card>;
+}
 
-  const getScoreBadge = (score: number) => {
-    if (score >= 80) return <Badge className="bg-success">Excellent</Badge>;
-    if (score >= 60) return <Badge variant="secondary">Good</Badge>;
-    return <Badge variant="destructive">Needs Attention</Badge>;
-  };
-
-  return (
-    <Card className="shadow-soft">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-lg">Your Engagement</CardTitle>
-          {isTracking && (
-            <Badge variant="outline" className="gap-1">
-              <Activity className="h-3 w-3 animate-pulse" />
-              Tracking
-            </Badge>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Overall</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`text-2xl font-bold ${getScoreColor(metrics.overall)}`}>
-                {metrics.overall}%
-              </span>
-              {getScoreBadge(metrics.overall)}
-            </div>
-          </div>
-          <Progress value={metrics.overall} className="h-2" />
-        </div>
-
-        <div className="space-y-3 pt-2">
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-2">
-                <Eye className="h-3 w-3 text-muted-foreground" />
-                <span>Attention</span>
-              </div>
-              <span className={`font-semibold ${getScoreColor(metrics.attention)}`}>
-                {metrics.attention}%
-              </span>
-            </div>
-            <Progress value={metrics.attention} className="h-1.5" />
-          </div>
-
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-2">
-                <Mic className="h-3 w-3 text-muted-foreground" />
-                <span>Participation</span>
-              </div>
-              <span className={`font-semibold ${getScoreColor(metrics.voice)}`}>
-                {metrics.voice}%
-              </span>
-            </div>
-            <Progress value={metrics.voice} className="h-1.5" />
-          </div>
-
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-2">
-                <Activity className="h-3 w-3 text-muted-foreground" />
-                <span>Screen Focus</span>
-              </div>
-              <span className={`font-semibold ${getScoreColor(metrics.screenFocus)}`}>
-                {metrics.screenFocus}%
-              </span>
-            </div>
-            <Progress value={metrics.screenFocus} className="h-1.5" />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
+function Metric({ icon: Icon, label, value }: { icon: typeof Activity; label: string; value: number }) { return <div className="space-y-1"><div className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Icon className="h-3.5 w-3.5 text-muted-foreground" />{label}</span><strong>{value}%</strong></div><Progress value={value} className="h-1.5" /></div>; }

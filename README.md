@@ -1,49 +1,26 @@
-# Welcome to FULAFIA Online Class
+# FULAFIA Online Class
 
-## How can I edit this code?
+A teacher/student virtual classroom built with React, Supabase, LiveKit Cloud, MediaPipe, face-api.js, and Transformers.js.
 
-**Use your preferred IDE**
+## Included capabilities
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+- Role-protected teacher and student workspaces with invite-only teacher activation
+- Public, invite-code, and approval-based class enrollment
+- Class, session, resource, assignment, submission, grading, and reporting workflows
+- LiveKit multi-participant video, audio, screen sharing, device controls, and reconnection
+- Persistent Supabase Realtime chat, attendance intervals, and teacher intervention alerts
+- Local face enrollment, liveness checks, session-entry matching, and encrypted descriptor storage
+- Observable engagement signals and ephemeral local Whisper participation statistics
+- Named session analytics with PDF and CSV exports
+- Private storage objects with short-lived signed download links
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+Raw webcam frames, audio, and transcript text are not stored or sent to Supabase. Engagement measurements are advisory signals and must not be used as automatic disciplinary decisions.
 
-Follow these steps:
+## Local development
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+1. Copy `.env.example` to `.env.local` and provide the public Supabase values.
+2. Install dependencies with `pnpm install` or `npm install`.
+3. Start the app with `pnpm dev`.
+4. Run `pnpm test`, `pnpm lint`, and `pnpm build` before publishing.
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
-
-**Edit a file directly in GitHub**
-
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+The complete backend and LiveKit setup is documented in [DEPLOYMENT.md](./DEPLOYMENT.md).
